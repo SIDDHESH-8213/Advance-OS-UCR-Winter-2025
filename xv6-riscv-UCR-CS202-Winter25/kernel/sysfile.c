@@ -283,73 +283,84 @@ create(char *path, short type, short major, short minor)
   return ip;
 }
 
-int
-sys_symlink(void) {
+int sys_symlink(void) {
   char target[MAXPATH], path[MAXPATH];
   struct inode *ip;
 
   if(argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0)
-    return -1;
+      return -1;
 
-  begin_op();
-  if((ip = create(path, T_SYMLINK, 0, 0)) == 0){
-    end_op();
-    return -1;
+  begin_op(1);
+  if((ip = create(path, T_SYMLINK, 0, 0)) == 0) {
+      end_op(1);
+      return -1;
   }
-  
-  writei(ip, 0, (uint*)target, 0, strlen(target) + 1);
+
+  writei(ip, 0, (uint64)(target), 0, strlen(target) + 1);
   iunlockput(ip);
-  end_op();
+  end_op(1);
 
   return 0;
 }
 
 
-int
-sys_open(void) {
+int sys_open(void) {
   char path[MAXPATH];
   struct inode *ip;
   int fd, omode;
-  
-  if(argstr(0, path, MAXPATH) < 0 || argint(1, &omode) < 0)
-    return -1;
+  struct file *f;
 
-  begin_op();
+  if(argstr(0, path, MAXPATH) < 0 || argint(1, &omode) < 0)
+      return -1;
+
+  begin_op(1);
   if((ip = namei(path)) == 0){
-    end_op();
-    return -1;
+      end_op(1);
+      return -1;
   }
   
   ilock(ip);
-  
+
   int follow_count = 0;
   while(ip->type == T_SYMLINK && !(omode & O_NOFOLLOW)) {
-    if(follow_count++ > 10) {  
+      if(follow_count++ > 10) {  
+          iunlockput(ip);
+          end_op(1);
+          return -1;
+      }
+      
+      char target[MAXPATH];
+      readi(ip, 0, (uint64)(target), 0, MAXPATH);
       iunlockput(ip);
-      end_op();
-      return -1;
-    }
-    
-    char target[MAXPATH];
-    readi(ip, 0, (uint*)target, 0, MAXPATH);
-    iunlockput(ip);
-    
-    if((ip = namei(target)) == 0) {  
-      end_op();
-      return -1;
-    }
-    
-    ilock(ip);
+      
+      if((ip = namei(target)) == 0) {  
+          end_op(1);
+          return -1;
+      }
+      
+      ilock(ip);
   }
 
-  if((fd = fdalloc(ip)) < 0){
-    iunlockput(ip);
-    end_op();
-    return -1;
+  if((f = filealloc()) == 0) {
+      iunlockput(ip);
+      end_op(1);
+      return -1;
   }
-  
+
+  f->type = FD_INODE;
+  f->ip = ip;
+  f->off = 0;
+  f->readable = 1;
+  f->writable = 1;
+
+  if((fd = fdalloc(f)) < 0) {
+      fileclose(f);
+      end_op(1);
+      return -1;
+  }
+
   iunlock(ip);
-  end_op();
+  end_op(1);
 
   return fd;
 }
