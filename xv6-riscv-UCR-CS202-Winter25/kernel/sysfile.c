@@ -308,9 +308,13 @@ sys_symlink(void)
         return -1;
     }
 
-    // Start another transaction for writing the symlink target path
+    // Allocate a block to store the symlink path
     begin_op(ROOTDEV);
-    writei(ip, 0, (uint64)target, 0, strlen(target) + 1);
+    if (writei(ip, 0, (uint64)target, 0, strlen(target) + 1) != strlen(target) + 1) {
+        iunlockput(ip);
+        end_op(ROOTDEV);
+        return -1;
+    }
     end_op(ROOTDEV);
 
     iunlockput(ip);
