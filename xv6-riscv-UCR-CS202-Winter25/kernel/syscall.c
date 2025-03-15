@@ -7,6 +7,8 @@
 #include "syscall.h"
 #include "defs.h"
 
+extern int sys_symlink(void);
+
 // Fetch the uint64 at addr from the current process.
 int
 fetchaddr(uint64 addr, uint64 *ip)
@@ -131,6 +133,7 @@ static uint64 (*syscalls[])(void) = {
 [SYS_close]   sys_close,
 [SYS_ntas]    sys_ntas,
 [SYS_symlink]    sys_symlink,
+
 };
 
 void
@@ -148,3 +151,4 @@ syscall(void)
     p->tf->a0 = -1;
   }
 }
+
