@@ -283,92 +283,77 @@ create(char *path, short type, short major, short minor)
   return ip;
 }
 
-int sys_symlink(void) {
-  char target[MAXPATH], path[MAXPATH];
-  struct inode *ip;
-
-  if(argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0)
-      return -1;
-
-  begin_op(1);
-  if((ip = create(path, T_SYMLINK, 0, 0)) == 0) {
-      end_op(1);
-      return -1;
-  }
-
-  writei(ip, 0, (uint64)(target), 0, (uint64)(strlen(target) + 1));
-  iunlockput(ip);
-  end_op(1);
-
+uint64
+sys_symlink(void)
+{
+  //your implementation goes here
   return 0;
 }
 
-
-int sys_open(void) {
+uint64
+sys_open(void)
+{
   char path[MAXPATH];
-  struct inode *ip;
   int fd, omode;
   struct file *f;
+  struct inode *ip;
+  int n;
 
-  if(argstr(0, path, MAXPATH) < 0 || argint(1, &omode) < 0)
+  if((n = argstr(0, path, MAXPATH)) < 0 || argint(1, &omode) < 0)
+    return -1;
+
+  begin_op(ROOTDEV);
+
+  if(omode & O_CREATE){
+    ip = create(path, T_FILE, 0, 0);
+    if(ip == 0){
+      end_op(ROOTDEV);
       return -1;
-
-  begin_op(1);
-  if((ip = namei(path)) == 0){
-      end_op(1);
+    }
+  } else {
+    if((ip = namei(path)) == 0){
+      end_op(ROOTDEV);
       return -1;
-  }
-  
-  ilock(ip);
-
-  int follow_count = 0;
-  while(ip->type == T_SYMLINK && !(omode & O_NOFOLLOW)) {
-      if(follow_count++ > 10) {  
-          iunlockput(ip);
-          end_op(1);
-          return -1;
-      }
-
-      char target[MAXPATH];
-      readi(ip, 0, (uint64)(target), 0, MAXPATH);
+    }
+    ilock(ip);
+    if(ip->type == T_DIR && omode != O_RDONLY){
       iunlockput(ip);
-
-      // 🔹 FIX: Free old inode before assigning a new one
-      struct inode *next_ip = namei(target);
-      if(next_ip == 0) {  
-          end_op(1);
-          return -1;
-      }
-      ilock(next_ip);
-      iput(ip);  // Free the old inode
-      ip = next_ip;
-  }
-
-  if((f = filealloc()) == 0) {
-      iunlockput(ip);
-      end_op(1);
+      end_op(ROOTDEV);
       return -1;
+    }
   }
 
-  f->type = FD_INODE;
+  if(ip->type == T_DEVICE && (ip->major < 0 || ip->major >= NDEV)){
+    iunlockput(ip);
+    end_op(ROOTDEV);
+    return -1;
+  }
+
+  if((f = filealloc()) == 0 || (fd = fdalloc(f)) < 0){
+    if(f)
+      fileclose(f);
+    iunlockput(ip);
+    end_op(ROOTDEV);
+    return -1;
+  }
+
+  if(ip->type == T_DEVICE){
+    f->type = FD_DEVICE;
+    f->major = ip->major;
+    f->minor = ip->minor;
+  } else {
+    f->type = FD_INODE;
+  }
   f->ip = ip;
   f->off = 0;
   f->readable = !(omode & O_WRONLY);
   f->writable = (omode & O_WRONLY) || (omode & O_RDWR);
 
-  if((fd = fdalloc(f)) < 0) {
-      fileclose(f);
-      end_op(1);
-      return -1;
-  }
-
   iunlock(ip);
-  end_op(1);
+  end_op(ROOTDEV);
 
   return fd;
 }
-
-
 
 uint64
 sys_mkdir(void)
@@ -504,4 +489,3 @@ sys_pipe(void)
   }
   return 0;
 }
-
