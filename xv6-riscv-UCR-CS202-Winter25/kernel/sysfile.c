@@ -296,7 +296,7 @@ int sys_symlink(void) {
       return -1;
   }
 
-  writei(ip, 0, (uint64)(target), 0, strlen(target) + 1);
+  writei(ip, 0, (uint64)(target), 0, (uint64)(strlen(target) + 1));
   iunlockput(ip);
   end_op(1);
 
@@ -328,17 +328,20 @@ int sys_open(void) {
           end_op(1);
           return -1;
       }
-      
+
       char target[MAXPATH];
       readi(ip, 0, (uint64)(target), 0, MAXPATH);
       iunlockput(ip);
-      
-      if((ip = namei(target)) == 0) {  
+
+      // 🔹 FIX: Free old inode before assigning a new one
+      struct inode *next_ip = namei(target);
+      if(next_ip == 0) {  
           end_op(1);
           return -1;
       }
-      
-      ilock(ip);
+      ilock(next_ip);
+      iput(ip);  // Free the old inode
+      ip = next_ip;
   }
 
   if((f = filealloc()) == 0) {
@@ -350,8 +353,8 @@ int sys_open(void) {
   f->type = FD_INODE;
   f->ip = ip;
   f->off = 0;
-  f->readable = 1;
-  f->writable = 1;
+  f->readable = !(omode & O_WRONLY);
+  f->writable = (omode & O_WRONLY) || (omode & O_RDWR);
 
   if((fd = fdalloc(f)) < 0) {
       fileclose(f);
@@ -364,6 +367,7 @@ int sys_open(void) {
 
   return fd;
 }
+
 
 
 uint64
